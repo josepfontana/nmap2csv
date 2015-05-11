@@ -12,8 +12,10 @@
 # v3.0 27/11/2013 - Josep Fontana - choose action (launch nmap scans and/or
 #									parse xml files) and which ports to report
 # v4.0 13/03/2014 - Josep Fontana - output reflects parameter -p
-#                                 - added smb-os-discovery column
+#                                   added smb-os-discovery column
 # v4.1 28/03/2014 - Josep Fontana - cleaned new code and fixed option switches
+# v4.2 11/05/2015 - Josep Fontana - added smb-hostname, sql version
+#									and http title columns
 #
 # TODO: change output name, enable/disable columns at output
 # 
@@ -171,12 +173,12 @@ sub parse_xml {
 	if ($_[1] eq "d")
 	{
 		# default headers for default ports
-		print OUT "Hostname,IP,OS,SMB-OS,Location,Status,http,https,sql,ftp,ssh,smtp,netbios,ldap,ldaps\n";
+		print OUT "IP,Hostname,SMB-Hostname,SMB-FQDN,OS,SMB-OS,SMB-SQL,Location,Status,http,https,sql,ftp,ssh,smtp,netbios,ldap,ldaps\n";
 	} else
 	{
 		# add 
-		print OUT "Hostname,IP,OS,SMB-OS,Location,Status";
-		
+		print OUT "IP,Hostname,SMB-Hostname,SMB-FQDN,OS,SMB-OS,SMB-SQL,HTTP title (TCP/80),Location,Status";
+				#$ip,$hostname,$smb_hostname,$smb_fqdn,$os,$smb_os,$smb_sql,$http_title,$site,$status
 		
 		foreach $p (@ports)
 		{
@@ -206,7 +208,7 @@ sub parse_xml {
 		if (! @hosts)
 		{
 			$xml_file =~ s/.xml//;
-			print OUT ("$xml_file,Host is down,,N/A,N/A,,,,,,,,,\n");
+			print OUT ("$xml_file,Host is down,,N/A,N/A,N/A,N/A,N/A,,,,,,,,,\n");   # this might not work !!!
 			next;
 		}
 		
@@ -225,33 +227,152 @@ sub parse_xml {
 				$os =~ s/\r//;
 				$os =~ s/\n//;
 				$os =~ s/,//g;
+				$os =~ s/^\s+|\s+$//g;
 			}else 
 			{
 				$os = "N/A";
 			}
 			
+
 			# if we have information from smb-os-discovery, take it
 			my $smb_os_href = ($host->hostscripts("smb-os-discovery"));
-			my $smb_os = $smb_os_href->{'output'} || undef;  # will it work? :^P
+			my $smb_os_discovery = $smb_os_href->{'output'} || undef;  # will it work? :^P
 			
+			#get OS version from SMB script
+			my $smb_os = $smb_os_discovery;
 			if (defined $smb_os)
 			{
 				# parse result of smb-os-discovery
 				$smb_os =~ s/\r//;
 				$smb_os =~ s/\n//;
 				$smb_os =~ s/,//g;
-				#$smb_os =~ /  OS CPE/;
 				$smb_os =~ /\n/;
-				$smb_os = $`;
+				$smb_os = $`; #everything before previous match
 				$smb_os =~ /OS: /;
-				$smb_os = $';
+				$smb_os = $'; # everything after previous match
+				$smb_os =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
 			} else { $smb_os = "N/A";}
 			
-	my $private1 = NetAddr::IP->new('192.168.0.0/16');
-	my $private2 = NetAddr::IP->new('169.254.0.0/16');
-	my $private3 = NetAddr::IP->new('172.16.0.0/12');
-	my $private4 = NetAddr::IP->new('127.0.0.0/8');
-	my $private5 = NetAddr::IP->new('10.0.0.0/8');
+			#get HOSTNAME version from SMB script
+			my $smb_hostname = $smb_os_discovery;
+			if (defined $smb_hostname)
+			{
+				# parse result of smb-os-discovery
+				$smb_hostname =~ s/\r//g;
+				$smb_hostname =~ s/\n//g;
+				$smb_hostname =~ s/,//g;
+				$smb_hostname =~ /NetBIOS computer name\: /;
+				$smb_hostname = $';
+				$_ = $smb_hostname;
+				if (/Workgroup\:/)
+				{
+					$smb_hostname =~ /Workgroup\: /;
+					$smb_hostname = $`;
+				} else
+				{
+					$smb_hostname =~ /  Domain name\: /;
+					$smb_hostname = $`;
+				}
+				$smb_hostname =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
+			} else { $smb_hostname = "N/A";}
+			
+			#get FQDN version from SMB script
+			my $smb_fqdn = $smb_os_discovery;
+			if (defined $smb_fqdn)
+			{
+				# parse result of smb-os-discovery
+				$smb_fqdn =~ s/\r//g;
+				$smb_fqdn =~ s/\n//g;
+				$smb_fqdn =~ s/,//g;
+				$smb_fqdn =~ /  System time\: /;
+				$smb_fqdn = $`;
+				#$smb_fqdn_fallback = $smb_fqdn;
+				$_ = $smb_fqdn;
+				if (/FQDN\:/)
+				{
+					$smb_fqdn =~ /FQDN\: /;
+					$smb_fqdn = $';
+				} else
+				{
+					$smb_fqdn =~ /Workgroup\: /;
+					$smb_fqdn = "(Workgroup) " . $';
+				}	
+				
+				$smb_fqdn =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
+				
+
+			} else { $smb_fqdn = "N/A";}
+			
+			
+			# if we have information from ms-sql-info, take it
+			my $ms_sql_info = ($host->hostscripts("ms-sql-info"));
+			my $smb_sql = $ms_sql_info->{'output'} || undef;
+			if (defined $smb_sql)
+			{
+				# parse result of ms-sql-info
+				$smb_sql =~ s/\r//g;
+				$smb_sql =~ s/\n//g;
+				$smb_sql =~ s/,//g;
+				$smb_sql =~ /Version\: /;
+				$smb_sql = $';
+				$smb_sql =~ / Product\: /;
+				$smb_sql = $`;
+				$_ = $smb_sql;
+				if (/ Version number\: /)
+				{
+					$smb_sql =~ / Version number\: /;
+					$smb_sql = $`;
+				}
+				$smb_sql =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
+			} else { $smb_sql = "N/A";}
+			
+			
+			# if we have port 80 open get information from http-title and put it into $http_title
+			my $http_title = '';
+			if ($host->tcp_port_state(80) ~~ 'open')
+			{
+#				if ('http-title' ~~ $host->tcp_service(80)->scripts())
+#				{
+					my $http_title_script = $host->tcp_service(80)->scripts("http-title");
+					my $http_title_output = $http_title_script->{'output'} || undef;
+					if (defined $http_title_output)
+					{
+						$_ = $http_title_output;
+						if ( m/^Did not follow/)
+						{
+							$http_title = $http_title_output;
+						} else 
+						{
+							#$http_title =~ /Requested resource was /;
+							#$http_title = $`;
+							$http_title = $http_title_output;
+							if ($http_title_output =~ m/Requested resource was /)
+							{
+								$http_title = $`;
+							}
+						}
+						
+						# cleaning before finishing with this string
+						$http_title =~ s/\n//g;
+						$http_title =~ s/\r//g;
+						$http_title =~ s/,//g;
+						$http_title =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
+						
+					} else
+					{
+#						$http_title = "N/A - could not get output from http-title script !!!";
+#					}
+#				} else
+#				{
+					$http_title = "N/A - http-title script did not run";
+				}
+			} else
+			{
+				$http_title = "N/A - Port closed";
+			}
+			
+			
+			
 			# find the site
 			my $site = "Internet";
 			{
@@ -273,7 +394,7 @@ sub parse_xml {
 					$site = "Private 10.0.0.0/8";
 				}	$site = "Private";
 			}
-			print OUT ("$hostname,$ip,$os,$smb_os,$site,$status");
+			print OUT ("$ip,$hostname,$smb_hostname,$smb_fqdn,$os,$smb_os,$smb_sql,$http_title,$site,$status");
 			
 			# go through the ports of interest
 			foreach $port (@ports)
@@ -372,7 +493,7 @@ sub progress_bar {
 }
 
 sub VERSION_MESSAGE {
-	print "\nhosts_profile.pl v4.1\n";
+	print "\nnmap2csv.pl v4.2\n";
 	exit();
 }
 
@@ -382,26 +503,7 @@ sub HELP_MESSAGE {
 Usage: nmap2csv.pl [-p port_list] [-n hosts_file]
 			     [-x csv_out_file] [--help] [--version]
 
-Scan hosts listed in a text file and/or create csv file with a summary
-
-
-	-p <ports list|d>		optional list of ports to include in the csv
-				or for the nmap scan
-				separated by commas, leave no space
-				example: -p 7,9,13,17,19
-				if \"d\" is provided for parsing, default port list
-				is used: 80,443,1433,21,22,25,445,389,636
-				if it's not provided, will scan all ports
-				or parse all open or closed or filtered ports
-
-	-s <hosts file>		perform the nmap scan of host included in
-				the file (one per line, either IP address or
-				hostname) and create xml output for each one
-				scan parameters are:
-				-p 1- -T4 -A --webxml -oX <hosts file>.xml
-
-	-n <nmap options>	options to pass to nmap when scanning
-				may be used together with -s
+Create csv file from nmap XML output
 
 	-i <input xml file(s)>	nmap xml file(s) to parse
 
