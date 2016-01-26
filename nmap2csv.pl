@@ -313,16 +313,27 @@ sub parse_xml {
 				$smb_sql =~ s/\r//g;
 				$smb_sql =~ s/\n//g;
 				$smb_sql =~ s/,//g;
-				$smb_sql =~ /Version\: /;
-				$smb_sql = $';
-				$smb_sql =~ / Product\: /;
-				$smb_sql = $`;
-				$_ = $smb_sql;
-				if (/ Version number\: /)
-				{
-					$smb_sql =~ / Version number\: /;
-					$smb_sql = $`;
-				}
+
+                                # NEW CODE - tested with nmap 7 code
+                                $smb_sql =~ /Version: /; # to avoid the "Instance name" chunk
+                                $smb_sql = $';
+                                $smb_sql =~ /name:/;
+                                $smb_sql = $';
+                                $smb_sql =~ /  /; # there *should* not be more than one space in the product/version string
+                                $smb_sql = $`;
+
+                                # OLD CODE - does not seem to work well with nmap 7 output
+                                #$smb_sql =~ /Version\: /;
+                                #$smb_sql = $';
+                                #$smb_sql =~ / Product\: /;
+                                #$smb_sql = $`;
+                                #$_ = $smb_sql;
+                                #if (/ Version number\: /)
+                                #{
+                                #       $smb_sql =~ / Version number\: /;
+                                #       $smb_sql = $`;
+                                #}
+
 				$smb_sql =~ s/^\s+|\s+$//g; # remove leading and trailing spaces
 			} else { $smb_sql = "N/A";}
 			
